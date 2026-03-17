@@ -128,7 +128,7 @@ local CONF_DIR  = DataStorage:getDataDir() .. "/settings/SSH-android"
 -- Runtime state (pid file, log) — goes in cache; safe to wipe.
 -- standalone.c must be built with SSHD_RUN_PATH support for these to land here.
 local RUN_DIR   = DataStorage:getDataDir() .. "/cache/SSH-android"
-local PID_FILE  = RUN_DIR  .. "/dropbear.pid"
+local PID_FILE  = CONF_DIR .. "/dropbear.pid"
 local LOG_FILE  = RUN_DIR  .. "/dropbear.err"
 local AUTH_KEYS = CONF_DIR .. "/authorized_keys"
 
@@ -203,17 +203,31 @@ end
 -- The exact prefix format depends on the dropbear log formatter; we strip
 -- everything up to and including the last ": " on each relevant line.
 local function readOneTimePassword()
+    logger.dbg("[SSH-android] readOneTimePassword: reading", LOG_FILE)
     local f = io.open(LOG_FILE, "r")
-    if not f then return nil end
+    if not f then
+        logger.warn("[SSH-android] readOneTimePassword: cannot open log file:", LOG_FILE)
+        return nil
+    end
     local content = f:read("*a")
     f:close()
+    logger.dbg("[SSH-android] readOneTimePassword: log size =", #content, "bytes")
 
     -- Quick exit if no password block in this log.
     -- NOTE: plain-mode find (3rd arg = true) treats the pattern as a literal
     -- string, so the search term must not use Lua pattern escapes like "%-".
     if not content:find("generating single-use password", 1, true) then
+        logger.dbg("[SSH-android] readOneTimePassword: trigger phrase not found in log")
+        -- Log a few lines from the end so we can see what IS in there.
+        local lines = {}
+        for ln in content:gmatch("[^\n]+") do lines[#lines + 1] = ln end
+        local tail_start = math.max(1, #lines - 5)
+        for i = tail_start, #lines do
+            logger.dbg("[SSH-android] log tail[" .. i .. "]:", lines[i])
+        end
         return nil
     end
+    logger.dbg("[SSH-android] readOneTimePassword: trigger phrase found, parsing...")
 
     local pw = nil
     local in_block = false
@@ -226,13 +240,16 @@ local function readOneTimePassword()
         local msg = line:match("%d+:%d+:%d+%s+(.-)%s*$") or line:gsub("^%s+", ""):gsub("%s+$", "")
 
         if line:find("generating single-use password", 1, true) then
+            logger.dbg("[SSH-android] readOneTimePassword: found trigger line:", line)
             in_block = true
             saw_open_dashes = false
         elseif in_block then
             if msg == "--------" then
                 if not saw_open_dashes then
+                    logger.dbg("[SSH-android] readOneTimePassword: saw opening dashes")
                     saw_open_dashes = true
                 else
+                    logger.dbg("[SSH-android] readOneTimePassword: saw closing dashes, block end")
                     -- Closing delimiter — end of this block.
                     in_block = false
                     saw_open_dashes = false
@@ -242,6 +259,8 @@ local function readOneTimePassword()
                 local candidate = msg:match("^(%S+)")
                 if candidate and #candidate >= 8 then
                     pw = candidate:sub(1, 8)
+                else
+                    logger.warn("[SSH-android] readOneTimePassword: candidate too short or nil, skipping")
                 end
                 in_block = false
                 saw_open_dashes = false
