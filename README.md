@@ -2,6 +2,11 @@
 
 SSH server for KOReader on Android, modelled after [simplesshd](https://github.com/pelya/simplesshd). Provides SSH access, `scp` file transfer, and `rsync` sync without root, foreground service, or Android boot receivers.
 
+---
+⚠️ Warning: this is AI generated code and thus prototype level!
+Use at your own risk.
+---
+
 ## Features
 
 - **Bootstrap auth**: on first connect a single-use 8-character password is generated and shown in the KOReader menu. No pre-configuration required.
